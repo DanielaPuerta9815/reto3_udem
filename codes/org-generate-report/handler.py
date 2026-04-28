@@ -32,14 +32,14 @@ def lambda_handler(event, context):
     try:
         body = json.loads(event.get("body", "{}"))
         event_id = body.get("event_id")
-        organizer_id = body.get("organizer_id")
+        organizer_id = claims.get("sub", "")
         report_type = body.get("report_type", "general")
 
         if not all([event_id, organizer_id]):
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "event_id y organizer_id son requeridos"}),
+                "body": json.dumps({"error": "event_id es requerido"}),
             }
 
         valid_report_types = ["general", "attendance", "sales", "occupancy"]

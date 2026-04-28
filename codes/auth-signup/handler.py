@@ -7,9 +7,13 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 cognito = boto3.client("cognito-idp")
+rds_client = boto3.client("rds-data")
 
 USER_POOL_ID = os.environ["USER_POOL_ID"]
 CLIENT_ID = os.environ["CLIENT_ID"]
+AURORA_CLUSTER_ARN = os.environ.get("AURORA_CLUSTER_ARN", "")
+AURORA_SECRET_ARN = os.environ.get("AURORA_SECRET_ARN", "")
+AURORA_DB_NAME = os.environ.get("AURORA_DB_NAME", "")
 
 
 def lambda_handler(event, context):
@@ -61,6 +65,36 @@ def lambda_handler(event, context):
             Username=email,
             GroupName=group,
         )
+
+        # 4. Obtener el sub (ID único) del usuario recién creado
+        user_info = cognito.admin_get_user(
+            UserPoolId=USER_POOL_ID,
+            Username=email,
+        )
+        user_sub = ""
+        for attr in user_info.get("UserAttributes", []):
+            if attr["Name"] == "sub":
+                user_sub = attr["Value"]
+                break
+
+        # 5. Si es ORGANIZER, registrar en la tabla organizers de Aurora
+        if group == "ORGANIZER" and AURORA_CLUSTER_ARN:
+            name = body.get("name", email)
+            rds_client.execute_statement(
+                resourceArn=AURORA_CLUSTER_ARN,
+                secretArn=AURORA_SECRET_ARN,
+                database=AURORA_DB_NAME,
+                sql="""
+                    INSERT INTO organizers (id, name, email)
+                    VALUES (:id, :name, :email)
+                """,
+                parameters=[
+                    {"name": "id", "value": {"stringValue": user_sub}},
+                    {"name": "name", "value": {"stringValue": name}},
+                    {"name": "email", "value": {"stringValue": email}},
+                ],
+            )
+            logger.info(f"Organizador registrado en Aurora: {user_sub}")
 
         logger.info(f"Usuario registrado: {email}, grupo: {group}")
 

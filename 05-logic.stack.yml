@@ -339,6 +339,7 @@ Resources:
                   - cognito-idp:SignUp
                   - cognito-idp:AdminConfirmSignUp
                   - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminGetUser
                   - cognito-idp:InitiateAuth
                 Resource: !Sub
                   - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
@@ -353,6 +354,20 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-auth-*:*"
+        - PolicyName: AuroraDataAPIAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
 
   # ===================================================================
   #  CLOUDWATCH LOG GROUPS
@@ -483,6 +498,12 @@ Resources:
             Fn::Sub: "reto3-${Stage}-cognito-userpool-id"
           CLIENT_ID: !ImportValue
             Fn::Sub: "reto3-${Stage}-cognito-client-id"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
 
   AuthLoginFunction:
     Type: AWS::Lambda::Function

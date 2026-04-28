@@ -36,8 +36,7 @@ def lambda_handler(event, context):
 
     try:
         event_id = event.get("pathParameters", {}).get("eventId")
-        query_params = event.get("queryStringParameters") or {}
-        organizer_id = query_params.get("organizer_id")
+        organizer_id = claims.get("sub", "")
 
         if not event_id:
             return {
@@ -50,7 +49,7 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "organizer_id es requerido"}),
+                "body": json.dumps({"error": "No se pudo obtener el organizer_id del token"}),
             }
 
         # Obtener nombre del evento antes de cancelar

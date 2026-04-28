@@ -38,7 +38,7 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "organizer_id es requerido"}),
+                "body": json.dumps({"error": "No se pudo obtener el organizer_id del token"}),
             }
 
         # Obtener eventos del organizador desde Aurora

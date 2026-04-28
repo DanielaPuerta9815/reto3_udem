@@ -33,7 +33,7 @@ def lambda_handler(event, context):
 
     try:
         body = json.loads(event.get("body", "{}"))
-        organizer_id = body.get("organizer_id")
+        organizer_id = claims.get("sub", "")
         event_id = body.get("event_id")
         alert_type = body.get("alert_type", "campaign")
         title = body.get("title")
@@ -45,7 +45,7 @@ def lambda_handler(event, context):
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
                 "body": json.dumps({
-                    "error": "organizer_id, event_id, title y message son requeridos"
+                    "error": "event_id, title y message son requeridos"
                 }),
             }
 

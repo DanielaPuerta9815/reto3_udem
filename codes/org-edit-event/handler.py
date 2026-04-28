@@ -43,13 +43,13 @@ def lambda_handler(event, context):
             }
 
         body = json.loads(event.get("body", "{}"))
-        organizer_id = body.get("organizer_id")
+        organizer_id = claims.get("sub", "")
 
         if not organizer_id:
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "organizer_id es requerido"}),
+                "body": json.dumps({"error": "No se pudo obtener el organizer_id del token"}),
             }
 
         # Construir la consulta UPDATE dinámicamente

@@ -642,7 +642,7 @@ Busca los valores de:
 
 Para los endpoints que requieren autenticación (todos excepto `/auth/signup` y `/auth/login`), necesitas configurar el header de autorización:
 
-1. En la colección **"Reto3_UdeM_AWS"**, haz clic derecho y selecciona **"Edit"**
+1. Haz clic en la colección **"Reto3_UdeM_AWS"**
 2. Ve a la pestaña **"Authorization"** (o "Auth")
 3. Selecciona Type: **"Bearer Token"**
 4. En el campo Token, escribe: `{{TOKEN}}`
@@ -683,7 +683,7 @@ En Postman, crea una nueva petición (o usa el endpoint de Auth) con:
   "email": "organizador@tudominio.com",
   "password": "Password123!",
   "name": "Juan Organizador",
-  "role": "ORGANIZER"
+  "group": "ORGANIZER"
 }
 ```
 
@@ -704,7 +704,7 @@ Crea otra petición similar:
   "email": "comprador@tudominio.com",
   "password": "Password123!",
   "name": "María Compradora",
-  "role": "ATTENDEE"
+  "group": "ATTENDEE"
 }
 ```
 
@@ -734,8 +734,8 @@ La respuesta incluirá un campo `IdToken` (o `token`). **Copia todo el valor del
 
 ### 17.2 - Guardar el Token en la Variable de Postman
 
-1. En Postman, ve a **"Environments"** → **"Reto3 AWS Dev"**
-2. En la variable `TOKEN`, pega el token JWT que copiaste
+1. En Postman, ve a **"Environments"** → **"Reto3 AWS Dev"**"
+2. En la variable `TOKEN`, pega el token JWT que copiaste (propiedad "id_token")
 3. Haz clic en **"Save"**
 
 > Ahora todas las peticiones que usen `{{TOKEN}}` incluirán automáticamente el header `Authorization: Bearer <token>`.
@@ -758,7 +758,6 @@ Usa el request **"Organizer - CREATE EVENT"** de la colección:
 
 ```json
 {
-  "organizer_id": "org-001",
   "name": "Concierto de Rock 2026",
   "description": "Gran concierto de rock en Bogotá con artistas nacionales e internacionales",
   "event_date": "2026-06-15",
@@ -779,14 +778,14 @@ Haz clic en **"Send"**. La respuesta incluirá un `event_id`.
 Usa **"Organizer - GET MY EVENTS"**:
 
 - **Método**: `GET`
-- **URL**: `{{BASE_URL}}/organizer/events?organizer_id=org-001`
+- **URL**: `{{BASE_URL}}/organizer/events`
 
 ### 18.3 - Ver Asientos de un Evento
 
 Usa **"Organizer - GET SEATS BY EVENT"**:
 
 - **Método**: `GET`
-- **URL**: `{{BASE_URL}}/organizer/events/{{EVENT_ID}}?organizer_id=org-001`
+- **URL**: `{{BASE_URL}}/organizer/events/{{EVENT_ID}}`
 
 ### 18.4 - Actualizar un Evento
 
@@ -798,7 +797,6 @@ Usa **"Organizer - UPDATE EVENT"**:
 
 ```json
 {
-  "organizer_id": "org-001",
   "name": "Concierto de Rock 2026 - Edición Especial",
   "description": "Evento actualizado con artistas sorpresa"
 }
@@ -814,7 +812,6 @@ Usa **"Organizer - CREATE ALERT/NOTIFICATION"**:
 
 ```json
 {
-  "organizer_id": "org-001",
   "event_id": "{{EVENT_ID}}",
   "title": "¡Últimas entradas disponibles!",
   "message": "No te pierdas el Concierto de Rock 2026. Quedan pocas entradas.",
@@ -834,7 +831,6 @@ Usa **"Organizer - CREATE REPORT"**:
 ```json
 {
   "event_id": "{{EVENT_ID}}",
-  "organizer_id": "org-001",
   "report_type": "general"
 }
 ```

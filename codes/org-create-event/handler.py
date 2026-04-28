@@ -34,7 +34,15 @@ def lambda_handler(event, context):
     try:
         body = json.loads(event.get("body", "{}"))
 
-        required_fields = ["organizer_id", "name", "event_date", "event_time", "total_seats", "location_id"]
+        organizer_id = claims.get("sub", "")
+        if not organizer_id:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+                "body": json.dumps({"error": "No se pudo obtener el organizer_id del token"}),
+            }
+
+        required_fields = ["name", "event_date", "event_time", "total_seats", "location_id"]
         missing = [f for f in required_fields if not body.get(f)]
         if missing:
             return {
@@ -58,7 +66,7 @@ def lambda_handler(event, context):
             """,
             parameters=[
                 {"name": "id", "value": {"stringValue": event_id}},
-                {"name": "organizer_id", "value": {"stringValue": body["organizer_id"]}},
+                {"name": "organizer_id", "value": {"stringValue": organizer_id}},
                 {"name": "name", "value": {"stringValue": body["name"]}},
                 {"name": "description", "value": {"stringValue": body.get("description", "")}},
                 {"name": "event_date", "value": {"stringValue": body["event_date"]}},
@@ -96,7 +104,7 @@ def lambda_handler(event, context):
                     }
                 )
 
-        logger.info(f"Evento creado: {event_id} por organizador {body['organizer_id']}")
+        logger.info(f"Evento creado: {event_id} por organizador {organizer_id}")
 
         return {
             "statusCode": 201,
