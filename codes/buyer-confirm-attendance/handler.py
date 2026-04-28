@@ -16,6 +16,16 @@ def lambda_handler(event, context):
     """Confirma o marca la asistencia de un comprador a un evento."""
     logger.info("POST /buyer/attendance - Confirmar asistencia")
 
+    # Validar grupo del JWT
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    groups = claims.get("cognito:groups", "")
+    if "ATTENDEE" not in groups:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "Acceso denegado. Se requiere rol ATTENDEE."}),
+        }
+
     try:
         body = json.loads(event.get("body", "{}"))
         event_id = body.get("event_id")

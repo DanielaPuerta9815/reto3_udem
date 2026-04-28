@@ -17,6 +17,18 @@ def lambda_handler(event, context):
     """Genera un reporte sobre un evento enviando un evento a EventBridge."""
     logger.info("POST /organizer/reports - Generar reporte de evento")
 
+    # Validar grupo del JWT y extraer email
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    groups = claims.get("cognito:groups", "")
+    if "ORGANIZER" not in groups:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "Acceso denegado. Se requiere rol ORGANIZER."}),
+        }
+
+    organizer_email = claims.get("email", "")
+
     try:
         body = json.loads(event.get("body", "{}"))
         event_id = body.get("event_id")
@@ -51,6 +63,7 @@ def lambda_handler(event, context):
                     "Detail": json.dumps({
                         "event_id": event_id,
                         "organizer_id": organizer_id,
+                        "organizer_email": organizer_email,
                         "report_type": report_type,
                         "requested_at": now,
                         "stage": STAGE,

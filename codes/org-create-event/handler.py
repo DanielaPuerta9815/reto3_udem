@@ -21,6 +21,16 @@ def lambda_handler(event, context):
     """Crea un evento nuevo para un organizador."""
     logger.info("POST /organizer/events - Crear evento")
 
+    # Validar grupo del JWT
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    groups = claims.get("cognito:groups", "")
+    if "ORGANIZER" not in groups:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "Acceso denegado. Se requiere rol ORGANIZER."}),
+        }
+
     try:
         body = json.loads(event.get("body", "{}"))
 

@@ -20,10 +20,19 @@ def lambda_handler(event, context):
     """Trae todos los eventos de un organizador específico."""
     logger.info("GET /organizer/events - Traer todos los eventos del organizador")
 
+    # Validar grupo del JWT
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    groups = claims.get("cognito:groups", "")
+    if "ORGANIZER" not in groups:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "Acceso denegado. Se requiere rol ORGANIZER."}),
+        }
+
     try:
-        # El organizer_id viene por query parameter (a futuro vendrá del token Cognito)
-        query_params = event.get("queryStringParameters") or {}
-        organizer_id = query_params.get("organizer_id")
+        # El organizer_id viene del JWT (sub del token)
+        organizer_id = claims.get("sub", "")
 
         if not organizer_id:
             return {

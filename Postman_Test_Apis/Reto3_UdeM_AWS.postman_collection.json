@@ -1,0 +1,364 @@
+{
+  "info": {
+    "_postman_id": "13545fd7-9e16-43be-8889-d0bbfc7974f1",
+    "name": "Reto3_UdeM_AWS",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "9987533"
+  },
+  "item": [
+    {
+      "name": "Organizer - CREATE EVENT",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"organizer_id\": \"org-001\",\r\n  \"name\": \"Concierto de Rock 2026\",\r\n  \"description\": \"Gran concierto de rock en Bogotá con artistas nacionales e internacionales\",\r\n  \"event_date\": \"2026-06-15\",\r\n  \"event_time\": \"19:00\",\r\n  \"total_seats\": 10,\r\n  \"location_id\": \"loc-001\",\r\n  \"default_section\": \"general\",\r\n  \"price\": 50000\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/events",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "events"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Organizer - GET MY EVENTS",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/events?organizer_id=org-001",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "events"
+          ],
+          "query": [
+            {
+              "key": "organizer_id",
+              "value": "org-001"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Organizer - GET SEATS BY EVENT",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/events/{{EVENT_ID}}?organizer_id=org-001",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "events",
+            "{{EVENT_ID}}"
+          ],
+          "query": [
+            {
+              "key": "organizer_id",
+              "value": "org-001"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Organizer - UPDATE EVENT",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"organizer_id\": \"org-001\",\r\n  \"name\": \"Concierto de Rock 2026 - Edición Especial\",\r\n  \"description\": \"Evento actualizado con artistas sorpresa\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/events/{{EVENT_ID}}",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "events",
+            "{{EVENT_ID}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Organizer - CREATE ALERT/NOTIFICATION",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"organizer_id\": \"org-001\",\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"title\": \"¡Últimas entradas disponibles!\",\r\n  \"message\": \"No te pierdas el Concierto de Rock 2026. Quedan pocas entradas.\",\r\n  \"alert_type\": \"promotion\",\r\n  \"target_audience\": \"all\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/alerts",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "alerts"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Organizer - CREATE REPORT",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"organizer_id\": \"org-001\",\r\n  \"report_type\": \"general\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/reports",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "reports"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Buyer - GET ALL EVENTS",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/buyer/events",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "buyer",
+            "events"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Buyer - GET SEATS BY EVENT",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/buyer/events/{{EVENT_ID}}",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "buyer",
+            "events",
+            "{{EVENT_ID}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Buyer - BUY SEAT",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"seat_id\": \"seat-0001\",\r\n  \"user_id\": \"user-001\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/buyer/seats",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "buyer",
+            "seats"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Buyer - CHANGE SEAT",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"user_id\": \"user-001\",\r\n  \"new_seat_id\": \"seat-0003\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/buyer/seats/{{SEAT_ID}}",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "buyer",
+            "seats",
+            "{{SEAT_ID}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Buyer - CANCEL SEAT",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/buyer/seats/{{SEAT_ID}}?event_id={{EVENT_ID}}&user_id=user-001",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "buyer",
+            "seats",
+            "{{SEAT_ID}}"
+          ],
+          "query": [
+            {
+              "key": "event_id",
+              "value": "{{EVENT_ID}}"
+            },
+            {
+              "key": "user_id",
+              "value": "user-001"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Buyer - ATTENDANCE",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"seat_id\": \"seat-0001\",\r\n  \"user_id\": \"user-001\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/buyer/attendance",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "buyer",
+            "attendance"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

@@ -8,7 +8,6 @@ Description: >
   # =====================================================================
 
 Parameters:
-
   Stage:
     Type: String
     Default: lab
@@ -17,62 +16,63 @@ Parameters:
       - dev
       - prod
     Description: >
-      Ambiente de despliegue. 
+      Ambiente de despliegue.
 
+  SesEmail:
+    Type: String
+    Description: >
+      Correo electronico que se usara como identidad verificada en SES para enviar notificaciones.
 
 #  RESOURCES
 # =====================================================================
 Resources:
-
-# ===================================================================
-#  EVENTBRIDGE - BUS PERSONALIZADO
-# ===================================================================
+  # ===================================================================
+  #  EVENTBRIDGE - BUS PERSONALIZADO
+  # ===================================================================
   EventBus:
     Type: AWS::Events::EventBus
     Properties:
       Name: !Sub "reto3-${Stage}-event-bus"
 
-# ===================================================================
-#  SQS - COLA DE REPORTES
-# ===================================================================
+  # ===================================================================
+  #  SQS - COLA DE REPORTES
+  # ===================================================================
 
   ReportQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "reto3-${Stage}-report-queue"
 
-# ===================================================================
-#  S3 - BUCKET PARA REPORTES
-# ===================================================================
+  # ===================================================================
+  #  S3 - BUCKET PARA REPORTES
+  # ===================================================================
 
   ReportsBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "reto3-${Stage}-reports"
 
-
-# ===================================================================
-#  SNS - TOPICO DE NOTIFICACIONES
-# ===================================================================
+  # ===================================================================
+  #  SNS - TOPICO DE NOTIFICACIONES
+  # ===================================================================
 
   NotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub "reto3-${Stage}-notifications"
 
-# ===================================================================
-#  SES - IDENTIDAD DE CORREO PARA NOTIFICACIONES
-# ===================================================================
+  # ===================================================================
+  #  SES - IDENTIDAD DE CORREO PARA NOTIFICACIONES
+  # ===================================================================
 
   SesEmailIdentity:
     Type: AWS::SES::EmailIdentity
     Properties:
-      EmailIdentity: "tu-correo@tudominio.com"
+      EmailIdentity: !Ref SesEmail
 
-
-# ===================================================================
-#  Reglas de EventBridge para enrutar eventos a la cola de reportes
-# ===================================================================
+  # ===================================================================
+  #  Reglas de EventBridge para enrutar eventos a la cola de reportes
+  # ===================================================================
 
   ReportRequestedRule:
     Type: AWS::Events::Rule
@@ -89,9 +89,82 @@ Resources:
         - Arn: !GetAtt ReportQueue.Arn
           Id: "ReportQueueTarget"
 
-# ===================================================================
-#  Permiso para que EventBridge pueda enviar mensajes a la cola de SQS
-# ===================================================================
+  # ===================================================================
+  #  Reglas de EventBridge para notificaciones via SNS
+  # ===================================================================
+
+  # --- Notificación de confirmación de reserva de asiento ---
+  SeatReservedNotificationRule:
+    Type: AWS::Events::Rule
+    DependsOn: NotificationTopicPolicy
+    Properties:
+      Name: !Sub "reto3-${Stage}-seat-reserved-notification"
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - prefix: !Sub "reto3.${Stage}"
+        detail-type:
+          - "SeatReserved"
+      Targets:
+        - Arn: !Ref NotificationTopic
+          Id: "SNSSeatReserved"
+          InputTransformer:
+            InputPathsMap:
+              event_name: "$.detail.event_name"
+              seat_id: "$.detail.seat_id"
+              event_date: "$.detail.event_date"
+              event_time: "$.detail.event_time"
+              reservation_id: "$.detail.reservation_id"
+              user_email: "$.detail.user_email"
+            InputTemplate: '"Confirmacion de Registro Exitosa\n\nHola! Tu reserva ha sido confirmada.\n\nEvento: <event_name>\nAsiento: <seat_id>\nFecha: <event_date>\nHora: <event_time>\nID de reserva: <reservation_id>\nCorreo: <user_email>\n\nTe esperamos!"'
+
+  # --- Notificación de actualización de evento ---
+  EventUpdatedNotificationRule:
+    Type: AWS::Events::Rule
+    DependsOn: NotificationTopicPolicy
+    Properties:
+      Name: !Sub "reto3-${Stage}-event-updated-notification"
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - prefix: !Sub "reto3.${Stage}"
+        detail-type:
+          - "EventUpdated"
+      Targets:
+        - Arn: !Ref NotificationTopic
+          Id: "SNSEventUpdated"
+          InputTransformer:
+            InputPathsMap:
+              event_name: "$.detail.event_name"
+              event_id: "$.detail.event_id"
+              user_emails: "$.detail.user_emails"
+            InputTemplate: '"Actualizacion de Evento\n\nEl evento <event_name> ha sido actualizado por el organizador.\n\nID del evento: <event_id>\nUsuarios registrados notificados: <user_emails>\n\nPor favor revisa los detalles actualizados del evento."'
+
+  # --- Notificación de cancelación de evento ---
+  EventCancelledNotificationRule:
+    Type: AWS::Events::Rule
+    DependsOn: NotificationTopicPolicy
+    Properties:
+      Name: !Sub "reto3-${Stage}-event-cancelled-notification"
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - prefix: !Sub "reto3.${Stage}"
+        detail-type:
+          - "EventCancelled"
+      Targets:
+        - Arn: !Ref NotificationTopic
+          Id: "SNSEventCancelled"
+          InputTransformer:
+            InputPathsMap:
+              event_name: "$.detail.event_name"
+              event_id: "$.detail.event_id"
+              user_emails: "$.detail.user_emails"
+            InputTemplate: '"Evento Cancelado\n\nLamentamos informarte que el evento <event_name> ha sido cancelado.\n\nID del evento: <event_id>\nUsuarios afectados: <user_emails>\n\nSi tenias una reserva, esta ha sido liberada automaticamente."'
+
+  # ===================================================================
+  #  Permiso para que EventBridge pueda enviar mensajes a la cola de SQS
+  # ===================================================================
 
   ReportQueuePolicy:
     Type: AWS::SQS::QueuePolicy
@@ -107,13 +180,29 @@ Resources:
             Action: sqs:SendMessage
             Resource: !GetAtt ReportQueue.Arn
 
+  # ===================================================================
+  #  Permiso para que EventBridge pueda publicar en el tópico SNS
+  # ===================================================================
+
+  NotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref NotificationTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref NotificationTopic
 
 # =====================================================================
 #  OUTPUTS
 # =====================================================================
 Outputs:
-
-# ---------- EventBridge ----------
+  # ---------- EventBridge ----------
   EventBridgeBusArn:
     Description: ARN del bus de EventBridge
     Value: !GetAtt EventBus.Arn
@@ -150,4 +239,3 @@ Outputs:
     Value: !Ref SesEmailIdentity
     Export:
       Name: !Sub "reto3-${Stage}-ses-email-identity"
-  

@@ -20,6 +20,16 @@ def lambda_handler(event, context):
     """Trae todos los eventos disponibles para los compradores."""
     logger.info("GET /buyer/events - Traer todos los eventos")
 
+    # Validar grupo del JWT
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    groups = claims.get("cognito:groups", "")
+    if "ATTENDEE" not in groups:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "Acceso denegado. Se requiere rol ATTENDEE."}),
+        }
+
     try:
         # Obtener metadata de eventos desde Aurora (nombre, descripcion, locacion, fecha, etc.)
         aurora_response = rds_client.execute_statement(

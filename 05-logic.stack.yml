@@ -108,6 +108,15 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-buyer-*:*"
+        - PolicyName: EventBridgeAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
 
   # ---------- Rol para Lambdas de organizadores ----------
   OrganizadoresCrudRole:
@@ -203,6 +212,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - s3:PutObject
+                  - s3:GetObject
                 Resource: !Sub "arn:aws:s3:::reto3-${Stage}-reports/*"
 
         - PolicyName: SNSPublishAccess
@@ -214,6 +224,15 @@ Resources:
                   - sns:Publish
                 Resource: !ImportValue
                   Fn::Sub: "reto3-${Stage}-sns-topic-arn"
+        - PolicyName: SESEmailAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: "*"
 
   # ---------- Rol para Lambda WebSocket ----------
   WebSocketLambdaRole:
@@ -286,6 +305,43 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-ws-*:*"
+
+  # ---------- Rol para Lambdas de autenticacion ----------
+  AuthLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-auth-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CognitoAuthAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:SignUp
+                  - cognito-idp:AdminConfirmSignUp
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:InitiateAuth
+                Resource: !Sub
+                  - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+                  - UserPoolId: !ImportValue
+                      Fn::Sub: "reto3-${Stage}-cognito-userpool-id"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-auth-*:*"
 
   # ===================================================================
   #  CLOUDWATCH LOG GROUPS
@@ -377,6 +433,65 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-ws-seat-status"
       RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  # --- Auth ---
+  LogGroupAuthSignup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-auth-signup"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupAuthLogin:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-auth-login"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  # ===================================================================
+  #  LAMBDA FUNCTIONS - AUTH (registro e inicio de sesion)
+  # ===================================================================
+
+  AuthSignupFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupAuthSignup
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-auth-signup"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt AuthLambdaRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/auth-signup.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          USER_POOL_ID: !ImportValue
+            Fn::Sub: "reto3-${Stage}-cognito-userpool-id"
+          CLIENT_ID: !ImportValue
+            Fn::Sub: "reto3-${Stage}-cognito-client-id"
+
+  AuthLoginFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupAuthLogin
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-auth-login"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt AuthLambdaRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/auth-login.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          CLIENT_ID: !ImportValue
+            Fn::Sub: "reto3-${Stage}-cognito-client-id"
 
   # ===================================================================
   #  LAMBDA FUNCTIONS - BUYER (compradores)
@@ -471,6 +586,10 @@ Resources:
             Fn::Sub: "reto3-${Stage}-aurora-secret-name"
           AURORA_DB_NAME: !ImportValue
             Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
 
   BuyerEditReservationFunction:
     Type: AWS::Lambda::Function
@@ -851,6 +970,127 @@ Resources:
       Enabled: true
 
   # ===================================================================
+  #  LAMBDA FUNCTION - SEND REMINDERS (recordatorios programados)
+  # ===================================================================
+
+  # ---------- Rol para Lambda de recordatorios ----------
+  SendRemindersRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-send-reminders-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBReadAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+        - PolicyName: AuroraDataAPIAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+        - PolicyName: SNSPublishAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-sns-topic-arn"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-send-reminders:*"
+
+  LogGroupSendReminders:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-send-reminders"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  SendRemindersFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupSendReminders
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-send-reminders"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt SendRemindersRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/send-reminders.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          SNS_TOPIC_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-sns-topic-arn"
+
+  # ---------- Regla programada de EventBridge (cada hora) para recordatorios ----------
+  ReminderScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "reto3-${Stage}-reminder-schedule"
+      Description: "Ejecuta la Lambda de recordatorios cada hora para verificar eventos proximos"
+      ScheduleExpression: "rate(1 hour)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SendRemindersFunction.Arn
+          Id: "SendRemindersTarget"
+
+  PermissionSendReminders:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SendRemindersFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ReminderScheduleRule.Arn
+
+  # ===================================================================
   #  LAMBDA FUNCTION - WEBSOCKET
   # ===================================================================
 
@@ -921,6 +1161,25 @@ Resources:
           - "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}"
           - UserPoolId: !ImportValue
               Fn::Sub: "reto3-${Stage}-cognito-userpool-id"
+
+  # ---------- Integraciones HTTP - Auth (sin JWT) ----------
+  IntegrationAuthSignup:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt AuthSignupFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationAuthLogin:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt AuthLoginFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
 
   # ---------- Integraciones HTTP - Buyer ----------
   IntegrationBuyerGetAllEvents:
@@ -1042,6 +1301,21 @@ Resources:
       IntegrationMethod: POST
       PayloadFormatVersion: "2.0"
 
+  # ---------- Rutas HTTP - Auth (sin autorizacion JWT) ----------
+  RouteAuthSignup:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /auth/signup"
+      Target: !Sub "integrations/${IntegrationAuthSignup}"
+
+  RouteAuthLogin:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /auth/login"
+      Target: !Sub "integrations/${IntegrationAuthLogin}"
+
   # ---------- Rutas HTTP - Buyer ----------
   RouteBuyerGetAllEvents:
     Type: AWS::ApiGatewayV2::Route
@@ -1160,6 +1434,23 @@ Resources:
       Target: !Sub "integrations/${IntegrationOrgCreateAlert}"
       AuthorizationType: JWT
       AuthorizerId: !Ref HttpApiAuthorizer
+
+  # ---------- Lambda Permissions - Auth ----------
+  PermissionAuthSignup:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthSignupFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionAuthLogin:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthLoginFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
 
   # ---------- Lambda Permissions - Buyer ----------
   PermissionBuyerGetAllEvents:
@@ -1438,3 +1729,13 @@ Outputs:
     Value: !GetAtt WsSeatStatusFunction.Arn
     Export:
       Name: !Sub "reto3-${Stage}-ws-seat-status-arn"
+
+  SendRemindersFunctionArn:
+    Value: !GetAtt SendRemindersFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-send-reminders-arn"
+
+  SendRemindersRoleArn:
+    Value: !GetAtt SendRemindersRole.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-send-reminders-role-arn"

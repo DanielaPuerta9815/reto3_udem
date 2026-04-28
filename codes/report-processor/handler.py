@@ -38,6 +38,7 @@ def lambda_handler(event, context):
 
             event_id = detail.get("event_id")
             organizer_id = detail.get("organizer_id")
+            organizer_email = detail.get("organizer_email", "")
             report_type = detail.get("report_type", "general")
             requested_at = detail.get("requested_at")
 
@@ -58,6 +59,15 @@ def lambda_handler(event, context):
                 ContentType="application/json"
             )
 
+            logger.info(f"Reporte guardado en s3://{REPORTS_BUCKET}/{key}")
+
+            # Generar URL prefirmada con expiracion de 24 horas
+            presigned_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": REPORTS_BUCKET, "Key": key},
+                ExpiresIn=86400,
+            )
+
             # 6. Notificar al organizador vía SNS
             sns.publish(
                 TopicArn=SNS_TOPIC_ARN,
@@ -66,29 +76,28 @@ def lambda_handler(event, context):
                     "message": "Tu reporte está listo",
                     "event_id": event_id,
                     "report_type": report_type,
-                    "s3_path": f"s3://{REPORTS_BUCKET}/{key}"
+                    "download_url": presigned_url
                 }, indent=2)
             )
 
-            logger.info(f"Reporte guardado en s3://{REPORTS_BUCKET}/{key}")
-
             # =========================
-            # SES EMAIL (opcional)
+            # SES EMAIL (al correo del organizador desde el JWT)
             # =========================
-            ses.send_email(
-                Source="lupersonal270@gmail.com",
-                Destination={
-                    "ToAddresses": ["lupersonal270@gmail.com"]
-                },
-                Message={
-                    "Subject": {"Data": "Reporte listo"},
-                    "Body": {
-                        "Text": {
-                            "Data": f"Tu reporte {report_type} ya está disponible en S3."
+            if organizer_email:
+                ses.send_email(
+                    Source=organizer_email,
+                    Destination={
+                        "ToAddresses": [organizer_email]
+                    },
+                    Message={
+                        "Subject": {"Data": "Reporte listo"},
+                        "Body": {
+                            "Text": {
+                                "Data": f"Tu reporte {report_type} ya está disponible.\n\nDescarga tu reporte aquí (válido por 24 horas):\n{presigned_url}"
+                            }
                         }
                     }
-                }
-            )
+                )
 
         except Exception as e:
             logger.error(f"Error procesando mensaje: {str(e)}")

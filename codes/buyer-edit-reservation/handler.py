@@ -16,6 +16,16 @@ def lambda_handler(event, context):
     """Edita la reserva de un asiento (por ejemplo, cambiar de asiento)."""
     logger.info("PUT /buyer/seats/{seatId} - Editar reserva")
 
+    # Validar grupo del JWT
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    groups = claims.get("cognito:groups", "")
+    if "ATTENDEE" not in groups:
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "Acceso denegado. Se requiere rol ATTENDEE."}),
+        }
+
     try:
         seat_id = event.get("pathParameters", {}).get("seatId")
         if not seat_id:
