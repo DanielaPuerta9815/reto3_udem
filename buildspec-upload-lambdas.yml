@@ -8,8 +8,8 @@ phases:
   build:
     commands:
       - echo "=== Obteniendo nombre del bucket de codigo Lambda ==="
-      - BUCKET_NAME=$(aws cloudformation list-exports --query "Exports[?Name=='reto3-${STAGE}-lambda-code-bucket'].Value" --output text)
-      - echo "Bucket destino: ${BUCKET_NAME}"
+      - 'BUCKET_NAME=$(aws cloudformation list-exports --query "Exports[?Name==''reto3-${STAGE}-lambda-code-bucket''].Value" --output text)'
+      - 'echo "Bucket destino: ${BUCKET_NAME}"'
       - echo "=== Subiendo ZIPs a S3 ==="
       - 'for zip_file in zips/*.zip; do func_name=$(basename "$zip_file"); echo "Subiendo ${func_name} -> s3://${BUCKET_NAME}/lambdas/${func_name}"; aws s3 cp "$zip_file" "s3://${BUCKET_NAME}/lambdas/${func_name}"; done'
       - echo "=== Upload completado ==="
