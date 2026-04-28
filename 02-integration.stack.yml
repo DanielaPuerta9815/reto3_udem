@@ -20,7 +20,7 @@ Parameters:
 
   SesEmail:
     Type: String
-    Default: "juanesdev221@gmail.com"
+    Default: "lupersonal270@gmail.com"
     Description: >
       Correo electronico que se usara como identidad verificada en SES para enviar notificaciones.
 

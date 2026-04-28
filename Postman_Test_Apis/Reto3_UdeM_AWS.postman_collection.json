@@ -19,7 +19,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\r\n  \"organizer_id\": \"org-001\",\r\n  \"name\": \"Concierto de Rock 2026\",\r\n  \"description\": \"Gran concierto de rock en Bogotá con artistas nacionales e internacionales\",\r\n  \"event_date\": \"2026-06-15\",\r\n  \"event_time\": \"19:00\",\r\n  \"total_seats\": 10,\r\n  \"location_id\": \"loc-001\",\r\n  \"default_section\": \"general\",\r\n  \"price\": 50000\r\n}",
+          "raw": "{\r\n  \"name\": \"Festival Vallenato 2027\",\r\n  \"description\": \"El Festival de la Leyenda Vallenata en su versión No. 59 abre su agenda de conciertos el 1 de mayo con una noche cargada de historia, sabores del folclor colombiano y un derroche absoluto de talento.\",\r\n  \"event_date\": \"2026-04-29\",\r\n  \"event_time\": \"20:00\",\r\n  \"total_seats\": 10,\r\n  \"location_id\": \"loc-001\",\r\n  \"default_section\": \"general\",\r\n  \"price\": 50000\r\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -43,24 +43,25 @@
       "name": "Organizer - GET MY EVENTS",
       "request": {
         "auth": {
-          "type": "noauth"
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{TOKEN}}",
+              "type": "string"
+            }
+          ]
         },
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{BASE_URL}}/organizer/events?organizer_id=org-001",
+          "raw": "{{BASE_URL}}/organizer/events",
           "host": [
             "{{BASE_URL}}"
           ],
           "path": [
             "organizer",
             "events"
-          ],
-          "query": [
-            {
-              "key": "organizer_id",
-              "value": "org-001"
-            }
           ]
         }
       },
@@ -72,7 +73,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{BASE_URL}}/organizer/events/{{EVENT_ID}}?organizer_id=org-001",
+          "raw": "{{BASE_URL}}/organizer/events/{{EVENT_ID}}",
           "host": [
             "{{BASE_URL}}"
           ],
@@ -80,12 +81,6 @@
             "organizer",
             "events",
             "{{EVENT_ID}}"
-          ],
-          "query": [
-            {
-              "key": "organizer_id",
-              "value": "org-001"
-            }
           ]
         }
       },
@@ -104,7 +99,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\r\n  \"organizer_id\": \"org-001\",\r\n  \"name\": \"Concierto de Rock 2026 - Edición Especial\",\r\n  \"description\": \"Evento actualizado con artistas sorpresa\"\r\n}",
+          "raw": "{\r\n  \"name\": \"Festival Vallenato 2027 - Edición Especial\",\r\n  \"description\": \"Evento actualizado con nuevos artistas sorpresa\"\r\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -129,7 +124,14 @@
       "name": "Organizer - CREATE ALERT/NOTIFICATION",
       "request": {
         "auth": {
-          "type": "noauth"
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{TOKEN}}",
+              "type": "string"
+            }
+          ]
         },
         "method": "POST",
         "header": [
@@ -141,7 +143,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\r\n  \"organizer_id\": \"org-001\",\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"title\": \"¡Últimas entradas disponibles!\",\r\n  \"message\": \"No te pierdas el Concierto de Rock 2026. Quedan pocas entradas.\",\r\n  \"alert_type\": \"promotion\",\r\n  \"target_audience\": \"all\"\r\n}",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"title\": \"¡Últimas entradas disponibles!\",\r\n  \"message\": \"No te pierdas el Concierto. Quedan pocas entradas.\",\r\n  \"alert_type\": \"promotion\",\r\n  \"target_audience\": \"all\"\r\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -244,7 +246,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"seat_id\": \"seat-0001\",\r\n  \"user_id\": \"user-001\"\r\n}",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"seat_id\": \"seat-0001\"\r\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -277,7 +279,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"user_id\": \"user-001\",\r\n  \"new_seat_id\": \"seat-0003\"\r\n}",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"new_seat_id\": \"seat-0003\"\r\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -304,7 +306,7 @@
         "method": "DELETE",
         "header": [],
         "url": {
-          "raw": "{{BASE_URL}}/buyer/seats/{{SEAT_ID}}?event_id={{EVENT_ID}}&user_id=user-001",
+          "raw": "{{BASE_URL}}/buyer/seats/{{SEAT_ID}}?event_id={{EVENT_ID}}",
           "host": [
             "{{BASE_URL}}"
           ],
@@ -317,10 +319,6 @@
             {
               "key": "event_id",
               "value": "{{EVENT_ID}}"
-            },
-            {
-              "key": "user_id",
-              "value": "user-001"
             }
           ]
         }
@@ -340,7 +338,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"seat_id\": \"seat-0001\",\r\n  \"user_id\": \"user-001\"\r\n}",
+          "raw": "{\r\n  \"event_id\": \"{{EVENT_ID}}\",\r\n  \"seat_id\": \"seat-0003\"\r\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -359,6 +357,191 @@
         }
       },
       "response": []
+    },
+    {
+      "name": "Auth - SIGNUP ORGANIZER",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"email\": \"juangalvis.sh@gmail.com\",\r\n  \"password\": \"Password123!\",\r\n  \"name\": \"Juan Organizador\",\r\n  \"group\": \"ORGANIZER\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/signup",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "auth",
+            "signup"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - LOGIN ORGANIZER",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"email\": \"juangalvis.sh@gmail.com\",\r\n  \"password\": \"Password123!\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/login",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - LOGIN BUYER",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"email\": \"galvis.apple@gmail.com\",\r\n  \"password\": \"Password123!\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/login",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - SIGNUP BUYER",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"email\": \"galvis.apple@gmail.com\",\r\n  \"password\": \"Password123!\",\r\n  \"name\": \"Galvis Comprador\",\r\n  \"group\": \"ATTENDEE\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/auth/signup",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "auth",
+            "signup"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Organizer - CANCEL EVENT",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/organizer/events/{{EVENT_ID}}",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "organizer",
+            "events",
+            "{{EVENT_ID}}"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{TOKEN}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
     }
   ]
 }
