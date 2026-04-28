@@ -881,10 +881,11 @@ Usa **"Buyer - BUY SEAT"**:
 ```json
 {
   "event_id": "{{EVENT_ID}}",
-  "seat_id": "seat-0001",
-  "user_id": "user-001"
+  "seat_id": "seat-0001"
 }
 ```
+
+> El `user_id` se obtiene automáticamente del token JWT, no es necesario enviarlo.
 
 Guarda el `seat_id` en la variable `SEAT_ID` si la respuesta devuelve uno diferente.
 
@@ -899,7 +900,6 @@ Usa **"Buyer - CHANGE SEAT"**:
 ```json
 {
   "event_id": "{{EVENT_ID}}",
-  "user_id": "user-001",
   "new_seat_id": "seat-0003"
 }
 ```
@@ -915,8 +915,7 @@ Usa **"Buyer - ATTENDANCE"**:
 ```json
 {
   "event_id": "{{EVENT_ID}}",
-  "seat_id": "seat-0001",
-  "user_id": "user-001"
+  "seat_id": "seat-0001"
 }
 ```
 
@@ -925,7 +924,7 @@ Usa **"Buyer - ATTENDANCE"**:
 Usa **"Buyer - CANCEL SEAT"**:
 
 - **Método**: `DELETE`
-- **URL**: `{{BASE_URL}}/buyer/seats/{{SEAT_ID}}?event_id={{EVENT_ID}}&user_id=user-001`
+- **URL**: `{{BASE_URL}}/buyer/seats/{{SEAT_ID}}?event_id={{EVENT_ID}}`
 
 ---
 

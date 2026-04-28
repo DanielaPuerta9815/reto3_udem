@@ -110,6 +110,7 @@ Resources:
                 Resource:
                   - !GetAtt PackageLambdasProject.Arn
                   - !GetAtt UploadLambdasProject.Arn
+                  - !GetAtt UpdateLambdasProject.Arn
               # --- Desplegar CloudFormation ---
               - Effect: Allow
                 Action:
@@ -184,6 +185,13 @@ Resources:
                 Action:
                   - cloudformation:ListExports
                 Resource: "*"
+              # --- Actualizar codigo de funciones Lambda ---
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                  - lambda:GetFunction
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:reto3-${Stage}-*"
 
   # ===================================================================
   #  IAM - ROL PARA CLOUDFORMATION (usado por los deploy actions)
@@ -514,6 +522,34 @@ Resources:
           Value: !Ref Stage
 
   # ===================================================================
+  #  CODEBUILD - PROYECTO: ACTUALIZAR CODIGO DE LAMBDAS
+  # ===================================================================
+  UpdateLambdasProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "reto3-${Stage}-update-lambdas"
+      Description: Fuerza la actualizacion del codigo de todas las funciones Lambda desde S3
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: STAGE
+            Value: !Ref Stage
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec-update-lambdas.yml
+      TimeoutInMinutes: 10
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ===================================================================
   #  CODEPIPELINE
   # ===================================================================
   Pipeline:
@@ -690,6 +726,28 @@ Resources:
                 RoleArn: !GetAtt CloudFormationRole.Arn
               InputArtifacts:
                 - Name: BuildOutput
+              RunOrder: 1
+
+        # =============================================================
+        #  STAGE 6 - UPDATE LAMBDAS (fuerza actualizacion del codigo)
+        #  Ejecuta aws lambda update-function-code para cada Lambda,
+        #  garantizando que el codigo mas reciente de S3 se aplique
+        #  aunque CloudFormation no detecte cambios en el S3Key.
+        # =============================================================
+        - Name: UpdateLambdas
+          Actions:
+            - Name: ForceUpdateLambdaCode
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref UpdateLambdasProject
+              InputArtifacts:
+                - Name: BuildOutput
+              OutputArtifacts:
+                - Name: UpdateOutput
               RunOrder: 1
 
 # =====================================================================

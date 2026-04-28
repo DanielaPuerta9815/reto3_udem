@@ -1,0 +1,35 @@
+version: 0.2
+
+# =====================================================================
+#  BUILDSPEC - Actualiza el codigo de todas las funciones Lambda
+#  Este buildspec se ejecuta en el stage "UpdateLambdas" del pipeline.
+#  Fuerza la actualizacion del codigo de cada Lambda desde S3,
+#  ya que CloudFormation no detecta cambios cuando el S3Key no cambia.
+# =====================================================================
+
+env:
+  variables:
+    STAGE: "dev"
+
+phases:
+  build:
+    commands:
+      - echo "=== Obteniendo nombre del bucket de codigo Lambda ==="
+      - 'BUCKET_NAME=$(aws cloudformation list-exports --query "Exports[?Name==''reto3-${STAGE}-lambda-code-bucket''].Value" --output text)'
+      - 'echo "Bucket: ${BUCKET_NAME}"'
+      - echo "=== Actualizando codigo de las funciones Lambda ==="
+      - |
+        for dir in codes/*/; do
+          func_name=$(basename "$dir")
+          echo "Actualizando reto3-${STAGE}-${func_name}..."
+          aws lambda update-function-code \
+            --function-name "reto3-${STAGE}-${func_name}" \
+            --s3-bucket "${BUCKET_NAME}" \
+            --s3-key "lambdas/${func_name}.zip" \
+            --no-cli-pager || echo "WARN: No se pudo actualizar ${func_name}"
+        done
+      - echo "=== Todas las Lambdas actualizadas ==="
+
+artifacts:
+  files:
+    - "**/*"
