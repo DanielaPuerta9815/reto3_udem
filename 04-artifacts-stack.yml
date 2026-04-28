@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Reto 3 - Stack el s3 con el código de las lambdas
+  Aqui se pueden definir buckets de s3 para almacenar el codigo de las lambdas
+
+# =====================================================================
+#  PARAMETERS
+# =====================================================================
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Ambiente de despliegue
+
+# =====================================================================
+#  RESOURCES
+# =====================================================================
+Resources:
+  # ===================================================================
+  #  S3 - BUCKET PARA CODIGO LAMBDA
+  # ===================================================================
+
+  LambdaCodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "reto3-${Stage}-lambda-code-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+# =====================================================================
+#  OUTPUTS
+# =====================================================================
+Outputs:
+  # ---------- S3 ----------
+  LambdaCodeBucketName:
+    Description: Nombre del bucket S3 para codigo Lambda
+    Value: !Ref LambdaCodeBucket
+    Export:
+      Name: !Sub "reto3-${Stage}-lambda-code-bucket"

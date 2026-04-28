@@ -1,0 +1,1440 @@
+# Aqui estaran las lambdas y el api gateway. Este stack se encarga de la logica de negocio y la capa de aplicacion.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Aqui estaran las lambdas y el api gateway. Este stack se encarga de la logica de negocio y la capa de aplicacion.
+  Incluye APIs REST (buyer/organizer) y WebSocket (estado de asientos en tiempo real).
+  Depende del stack database.yaml (debe desplegarse primero).
+  Tambien esta la definicion de roles para cada lambda, con permisos limitados a lo necesario (principio de privilegio minimo).
+
+# =====================================================================
+#  PARAMETERS
+# =====================================================================
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Ambiente de despliegue
+
+  LambdaCodePrefix:
+    Type: String
+    Default: lambdas
+    Description: Prefijo (carpeta) dentro del bucket para los .zip de las Lambdas
+
+# =====================================================================
+#  MAPPINGS
+# =====================================================================
+Mappings:
+  StageConfig:
+    dev:
+      LogRetentionDays: 14
+    staging:
+      LogRetentionDays: 30
+    prod:
+      LogRetentionDays: 90
+
+# =====================================================================
+#  RESOURCES
+# =====================================================================
+Resources:
+  # ===================================================================
+  #  IAM ROLES
+  # ===================================================================
+
+  # ---------- Rol para Lambdas de compradores/usuarios ----------
+  CompradoresCrudRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-compradores_crud"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-events-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-events-table-arn"
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+        - PolicyName: AuroraDataAPIAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:BeginTransaction
+                  - rds-data:CommitTransaction
+                  - rds-data:RollbackTransaction
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-buyer-*:*"
+
+  # ---------- Rol para Lambdas de organizadores ----------
+  OrganizadoresCrudRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-organizadores_crud"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-events-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-events-table-arn"
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+        - PolicyName: AuroraDataAPIAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:BeginTransaction
+                  - rds-data:CommitTransaction
+                  - rds-data:RollbackTransaction
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+        - PolicyName: EventBridgeAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-org-*:*"
+        - PolicyName: S3ReportWriteAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${BucketName}/*"
+                    - BucketName: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-reports-bucket-name"
+        - PolicyName: S3ReportsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub "arn:aws:s3:::reto3-${Stage}-reports/*"
+
+        - PolicyName: SNSPublishAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !ImportValue
+                  Fn::Sub: "reto3-${Stage}-sns-topic-arn"
+
+  # ---------- Rol para Lambda WebSocket ----------
+  WebSocketLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-ws-seat-status-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBReadSeats
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-events-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-events-table-arn"
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-arn"
+        - PolicyName: DynamoDBSocketsManagement
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: "reto3-${Stage}-dynamodb-sockets-table-arn"
+                  - !Sub
+                    - "${TableArn}/index/*"
+                    - TableArn: !ImportValue
+                        Fn::Sub: "reto3-${Stage}-dynamodb-sockets-table-arn"
+        - PolicyName: ManageWebSocketConnections
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource:
+                  - !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/${Stage}/POST/@connections/*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/reto3-${Stage}-ws-*:*"
+
+  # ===================================================================
+  #  CLOUDWATCH LOG GROUPS
+  # ===================================================================
+
+  # --- Buyer ---
+  LogGroupBuyerGetAllEvents:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-buyer-get-all-events"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupBuyerGetEventSeats:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-buyer-get-event-seats"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupBuyerReserveSeat:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-buyer-reserve-seat"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupBuyerEditReservation:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-buyer-edit-reservation"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupBuyerCancelReservation:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-buyer-cancel-reservation"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupBuyerConfirmAttendance:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-buyer-confirm-attendance"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  # --- Organizer ---
+  LogGroupOrgGetAllEvents:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-get-all-events"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupOrgGetEventSeats:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-get-event-seats"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupOrgCreateEvent:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-create-event"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupOrgEditEvent:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-edit-event"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupOrgDeleteEvent:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-delete-event"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupOrgGenerateReport:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-generate-report"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  LogGroupOrgCreateAlert:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-org-create-alert"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  # --- WebSocket ---
+  LogGroupWsSeatStatus:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-ws-seat-status"
+      RetentionInDays: !FindInMap [StageConfig, !Ref Stage, LogRetentionDays]
+
+  # ===================================================================
+  #  LAMBDA FUNCTIONS - BUYER (compradores)
+  # ===================================================================
+
+  BuyerGetAllEventsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupBuyerGetAllEvents
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-buyer-get-all-events"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt CompradoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/buyer-get-all-events.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  BuyerGetEventSeatsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupBuyerGetEventSeats
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-buyer-get-event-seats"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt CompradoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/buyer-get-event-seats.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  BuyerReserveSeatFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupBuyerReserveSeat
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-buyer-reserve-seat"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt CompradoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/buyer-reserve-seat.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  BuyerEditReservationFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupBuyerEditReservation
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-buyer-edit-reservation"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt CompradoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/buyer-edit-reservation.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  BuyerCancelReservationFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupBuyerCancelReservation
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-buyer-cancel-reservation"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt CompradoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/buyer-cancel-reservation.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  BuyerConfirmAttendanceFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupBuyerConfirmAttendance
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-buyer-confirm-attendance"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt CompradoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/buyer-confirm-attendance.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  # ===================================================================
+  #  LAMBDA FUNCTIONS - ORGANIZER (organizadores)
+  # ===================================================================
+
+  OrgGetAllEventsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgGetAllEvents
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-get-all-events"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-get-all-events.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+          REPORT_QUEUE_URL: !ImportValue
+            Fn::Sub: "reto3-${Stage}-report-queue-url"
+          SNS_TOPIC_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-sns-topic-arn"
+          REPORTS_BUCKET: !ImportValue
+            Fn::Sub: "reto3-${Stage}-reports-bucket-name"
+
+  OrgGetEventSeatsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgGetEventSeats
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-get-event-seats"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-get-event-seats.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+
+  OrgCreateEventFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgCreateEvent
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-create-event"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-create-event.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+
+  OrgEditEventFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgEditEvent
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-edit-event"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-edit-event.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+
+  OrgDeleteEventFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgDeleteEvent
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-delete-event"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-delete-event.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+
+  OrgGenerateReportFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgGenerateReport
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-generate-report"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-generate-report.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+
+  OrgCreateAlertFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupOrgCreateAlert
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-org-create-alert"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/org-create-alert.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_SECRET_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-name"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+          EVENTBRIDGE_BUS_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-arn"
+          EVENTBRIDGE_BUS_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-eventbridge-bus-name"
+
+  ReportProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-report-processor"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 256
+      Timeout: 60
+      Role: !GetAtt OrganizadoresCrudRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/report-processor.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          REPORTS_BUCKET: !ImportValue
+            Fn::Sub: "reto3-${Stage}-reports-bucket-name"
+          SNS_TOPIC_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-sns-topic-arn"
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          AURORA_CLUSTER_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-cluster-arn"
+          AURORA_SECRET_ARN: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-secret-arn"
+          AURORA_DB_NAME: !ImportValue
+            Fn::Sub: "reto3-${Stage}-aurora-db-name"
+
+  ReportQueueEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue
+        Fn::Sub: "reto3-${Stage}-report-queue-arn"
+      FunctionName: !Ref ReportProcessorFunction
+      BatchSize: 5
+      Enabled: true
+
+  # ===================================================================
+  #  LAMBDA FUNCTION - WEBSOCKET
+  # ===================================================================
+
+  WsSeatStatusFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroupWsSeatStatus
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-ws-seat-status"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt WebSocketLambdaRole.Arn
+      Code:
+        S3Bucket: !ImportValue
+          Fn::Sub: "reto3-${Stage}-lambda-code-bucket"
+        S3Key: !Sub "${LambdaCodePrefix}/ws-seat-status.zip"
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          DYNAMODB_EVENTS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-events-table-name"
+          DYNAMODB_SEATS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-seats-table-name"
+          DYNAMODB_SOCKETS_TABLE: !ImportValue
+            Fn::Sub: "reto3-${Stage}-dynamodb-sockets-table-name"
+          WEBSOCKET_CALLBACK_URL: !Sub "https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+
+  # ===================================================================
+  #  HTTP API GATEWAY (REST - buyer + organizer)
+  # ===================================================================
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "reto3-${Stage}-http-api"
+      ProtocolType: HTTP
+      Description: API REST para compradores y organizadores de eventos
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowHeaders: [Content-Type, Authorization, X-Amz-Date, X-Api-Key]
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: !Ref Stage
+      AutoDeploy: true
+
+  # ===================================================================
+  #  HTTP API GATEWAY + AMAZON COGNITO AUTHORIZER (para autenticación y autorización de compradores y organizadores)
+  # ===================================================================
+
+  HttpApiAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizerType: JWT
+      IdentitySource:
+        - "$request.header.Authorization"
+      Name: cognito-authorizer
+      JwtConfiguration:
+        Audience:
+          - !ImportValue
+            Fn::Sub: "reto3-${Stage}-cognito-client-id"
+        Issuer: !Sub
+          - "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}"
+          - UserPoolId: !ImportValue
+              Fn::Sub: "reto3-${Stage}-cognito-userpool-id"
+
+  # ---------- Integraciones HTTP - Buyer ----------
+  IntegrationBuyerGetAllEvents:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BuyerGetAllEventsFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationBuyerGetEventSeats:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BuyerGetEventSeatsFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationBuyerReserveSeat:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BuyerReserveSeatFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationBuyerEditReservation:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BuyerEditReservationFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationBuyerCancelReservation:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BuyerCancelReservationFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationBuyerConfirmAttendance:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BuyerConfirmAttendanceFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  # ---------- Integraciones HTTP - Organizer ----------
+  IntegrationOrgGetAllEvents:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgGetAllEventsFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationOrgGetEventSeats:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgGetEventSeatsFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationOrgCreateEvent:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgCreateEventFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationOrgEditEvent:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgEditEventFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationOrgDeleteEvent:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgDeleteEventFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  IntegrationOrgGenerateReport:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgGenerateReportFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+      # FunctionName: !Sub "reto3-${Stage}-generate-report"
+
+  IntegrationOrgCreateAlert:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrgCreateAlertFunction.Arn
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  # ---------- Rutas HTTP - Buyer ----------
+  RouteBuyerGetAllEvents:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /buyer/events"
+      Target: !Sub "integrations/${IntegrationBuyerGetAllEvents}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteBuyerGetEventSeats:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /buyer/events/{eventId}"
+      Target: !Sub "integrations/${IntegrationBuyerGetEventSeats}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteBuyerReserveSeat:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /buyer/seats"
+      Target: !Sub "integrations/${IntegrationBuyerReserveSeat}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteBuyerEditReservation:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "PUT /buyer/seats/{seatId}"
+      Target: !Sub "integrations/${IntegrationBuyerEditReservation}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteBuyerCancelReservation:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "DELETE /buyer/seats/{seatId}"
+      Target: !Sub "integrations/${IntegrationBuyerCancelReservation}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteBuyerConfirmAttendance:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /buyer/attendance"
+      Target: !Sub "integrations/${IntegrationBuyerConfirmAttendance}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  # ---------- Rutas HTTP - Organizer ----------
+  RouteOrgGetAllEvents:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /organizer/events"
+      Target: !Sub "integrations/${IntegrationOrgGetAllEvents}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteOrgGetEventSeats:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /organizer/events/{eventId}"
+      Target: !Sub "integrations/${IntegrationOrgGetEventSeats}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteOrgCreateEvent:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /organizer/events"
+      Target: !Sub "integrations/${IntegrationOrgCreateEvent}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteOrgEditEvent:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "PUT /organizer/events/{eventId}"
+      Target: !Sub "integrations/${IntegrationOrgEditEvent}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteOrgDeleteEvent:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "DELETE /organizer/events/{eventId}"
+      Target: !Sub "integrations/${IntegrationOrgDeleteEvent}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteOrgGenerateReport:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /organizer/reports"
+      Target: !Sub "integrations/${IntegrationOrgGenerateReport}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  RouteOrgCreateAlert:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /organizer/alerts"
+      Target: !Sub "integrations/${IntegrationOrgCreateAlert}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+
+  # ---------- Lambda Permissions - Buyer ----------
+  PermissionBuyerGetAllEvents:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BuyerGetAllEventsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionBuyerGetEventSeats:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BuyerGetEventSeatsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionBuyerReserveSeat:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BuyerReserveSeatFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionBuyerEditReservation:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BuyerEditReservationFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionBuyerCancelReservation:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BuyerCancelReservationFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionBuyerConfirmAttendance:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BuyerConfirmAttendanceFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  # ---------- Lambda Permissions - Organizer ----------
+  PermissionOrgGetAllEvents:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgGetAllEventsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionOrgGetEventSeats:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgGetEventSeatsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionOrgCreateEvent:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgCreateEventFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionOrgEditEvent:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgEditEventFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionOrgDeleteEvent:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgDeleteEventFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionOrgGenerateReport:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgGenerateReportFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  PermissionOrgCreateAlert:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrgCreateAlertFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  # ===================================================================
+  #  WEBSOCKET API GATEWAY
+  # ===================================================================
+
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "reto3-${Stage}-ws-api"
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  WebSocketIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsSeatStatusFunction.Arn}/invocations"
+
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$connect"
+      Target: !Sub "integrations/${WebSocketIntegration}"
+
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$disconnect"
+      Target: !Sub "integrations/${WebSocketIntegration}"
+
+  WebSocketDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$default"
+      Target: !Sub "integrations/${WebSocketIntegration}"
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      [WebSocketConnectRoute, WebSocketDisconnectRoute, WebSocketDefaultRoute]
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      DeploymentId: !Ref WebSocketDeployment
+      StageName: !Ref Stage
+
+  PermissionWsSeatStatus:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WsSeatStatusFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*"
+
+# =====================================================================
+#  OUTPUTS
+# =====================================================================
+Outputs:
+  HttpApiUrl:
+    Description: URL base del API REST
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+    Export:
+      Name: !Sub "reto3-${Stage}-http-api-url"
+
+  WebSocketUrl:
+    Description: URL del WebSocket API
+    Value: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+    Export:
+      Name: !Sub "reto3-${Stage}-ws-api-url"
+
+  HttpApiId:
+    Value: !Ref HttpApi
+    Export:
+      Name: !Sub "reto3-${Stage}-http-api-id"
+
+  WebSocketApiId:
+    Value: !Ref WebSocketApi
+    Export:
+      Name: !Sub "reto3-${Stage}-ws-api-id"
+
+  CompradoresCrudRoleArn:
+    Value: !GetAtt CompradoresCrudRole.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-compradores-crud-role-arn"
+
+  OrganizadoresCrudRoleArn:
+    Value: !GetAtt OrganizadoresCrudRole.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-organizadores-crud-role-arn"
+
+  WebSocketLambdaRoleArn:
+    Value: !GetAtt WebSocketLambdaRole.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-ws-role-arn"
+
+  BuyerGetAllEventsFunctionArn:
+    Value: !GetAtt BuyerGetAllEventsFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-buyer-get-all-events-arn"
+
+  BuyerGetEventSeatsFunctionArn:
+    Value: !GetAtt BuyerGetEventSeatsFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-buyer-get-event-seats-arn"
+
+  BuyerReserveSeatFunctionArn:
+    Value: !GetAtt BuyerReserveSeatFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-buyer-reserve-seat-arn"
+
+  BuyerEditReservationFunctionArn:
+    Value: !GetAtt BuyerEditReservationFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-buyer-edit-reservation-arn"
+
+  BuyerCancelReservationFunctionArn:
+    Value: !GetAtt BuyerCancelReservationFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-buyer-cancel-reservation-arn"
+
+  BuyerConfirmAttendanceFunctionArn:
+    Value: !GetAtt BuyerConfirmAttendanceFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-buyer-confirm-attendance-arn"
+
+  OrgGetAllEventsFunctionArn:
+    Value: !GetAtt OrgGetAllEventsFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-get-all-events-arn"
+
+  OrgGetEventSeatsFunctionArn:
+    Value: !GetAtt OrgGetEventSeatsFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-get-event-seats-arn"
+
+  OrgCreateEventFunctionArn:
+    Value: !GetAtt OrgCreateEventFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-create-event-arn"
+
+  OrgEditEventFunctionArn:
+    Value: !GetAtt OrgEditEventFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-edit-event-arn"
+
+  OrgDeleteEventFunctionArn:
+    Value: !GetAtt OrgDeleteEventFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-delete-event-arn"
+
+  OrgGenerateReportFunctionArn:
+    Value: !GetAtt OrgGenerateReportFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-generate-report-arn"
+
+  OrgCreateAlertFunctionArn:
+    Value: !GetAtt OrgCreateAlertFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-org-create-alert-arn"
+
+  WsSeatStatusFunctionArn:
+    Value: !GetAtt WsSeatStatusFunction.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-ws-seat-status-arn"

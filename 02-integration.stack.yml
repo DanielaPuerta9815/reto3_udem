@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  stack para Amazon SQS, Amazon SNS, Amazon EventBridge, Amazon SES 
+  y otros servicios de mensajeria y eventos. Este stack se encarga de la comunicacion asincrona,
+  notificaciones, eventos del sistema, etc. Aqui se pueden definir colas de mensajes, topicos de SNS, reglas de EventBridge, 
+  etc. para soportar la arquitectura orientada a eventos y la comunicacion entre componentes desacoplados de la aplicacion.
+
+  # =====================================================================
+
+Parameters:
+
+  Stage:
+    Type: String
+    Default: lab
+    AllowedValues:
+      - lab
+      - dev
+      - prod
+    Description: >
+      Ambiente de despliegue. 
+
+
+#  RESOURCES
+# =====================================================================
+Resources:
+
+# ===================================================================
+#  EVENTBRIDGE - BUS PERSONALIZADO
+# ===================================================================
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "reto3-${Stage}-event-bus"
+
+# ===================================================================
+#  SQS - COLA DE REPORTES
+# ===================================================================
+
+  ReportQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "reto3-${Stage}-report-queue"
+
+# ===================================================================
+#  S3 - BUCKET PARA REPORTES
+# ===================================================================
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "reto3-${Stage}-reports"
+
+
+# ===================================================================
+#  SNS - TOPICO DE NOTIFICACIONES
+# ===================================================================
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "reto3-${Stage}-notifications"
+
+# ===================================================================
+#  SES - IDENTIDAD DE CORREO PARA NOTIFICACIONES
+# ===================================================================
+
+  SesEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: "tu-correo@tudominio.com"
+
+
+# ===================================================================
+#  Reglas de EventBridge para enrutar eventos a la cola de reportes
+# ===================================================================
+
+  ReportRequestedRule:
+    Type: AWS::Events::Rule
+    DependsOn: ReportQueuePolicy
+    Properties:
+      Name: !Sub "reto3-${Stage}-report-requested-rule"
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - !Sub "reto3.${Stage}.organizer"
+        detail-type:
+          - "ReportRequested"
+      Targets:
+        - Arn: !GetAtt ReportQueue.Arn
+          Id: "ReportQueueTarget"
+
+# ===================================================================
+#  Permiso para que EventBridge pueda enviar mensajes a la cola de SQS
+# ===================================================================
+
+  ReportQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref ReportQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt ReportQueue.Arn
+
+
+# =====================================================================
+#  OUTPUTS
+# =====================================================================
+Outputs:
+
+# ---------- EventBridge ----------
+  EventBridgeBusArn:
+    Description: ARN del bus de EventBridge
+    Value: !GetAtt EventBus.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-eventbridge-bus-arn"
+
+  EventBridgeBusName:
+    Description: Nombre del bus de EventBridge
+    Value: !Ref EventBus
+    Export:
+      Name: !Sub "reto3-${Stage}-eventbridge-bus-name"
+
+  ReportQueueArn:
+    Value: !GetAtt ReportQueue.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-report-queue-arn"
+
+  ReportQueueUrl:
+    Value: !Ref ReportQueue
+    Export:
+      Name: !Sub "reto3-${Stage}-report-queue-url"
+
+  ReportsBucketName:
+    Value: !Ref ReportsBucket
+    Export:
+      Name: !Sub "reto3-${Stage}-reports-bucket-name"
+
+  NotificationTopicArn:
+    Value: !Ref NotificationTopic
+    Export:
+      Name: !Sub "reto3-${Stage}-sns-topic-arn"
+
+  SesEmailIdentityOutput:
+    Value: !Ref SesEmailIdentity
+    Export:
+      Name: !Sub "reto3-${Stage}-ses-email-identity"
+  

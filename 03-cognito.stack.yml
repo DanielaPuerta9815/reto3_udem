@@ -1,0 +1,63 @@
+# Aqui estara toda la configuracion de cognito, con su user pool, app client, etc. 
+# Este stack se encarga de la autenticacion y autorizacion de los usuarios.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cognito for events app
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+
+Resources:
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "reto3-${Stage}-user-pool"
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "reto3-${Stage}-client"
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  # Grupos (CLAVE para tu lógica)
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: ADMIN
+      UserPoolId: !Ref UserPool
+
+  OrganizerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: ORGANIZER
+      UserPoolId: !Ref UserPool
+
+  AttendeeGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: ATTENDEE
+      UserPoolId: !Ref UserPool
+
+Outputs:
+
+  UserPoolId:
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub "reto3-${Stage}-cognito-userpool-id"
+
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+    Export:
+      Name: !Sub "reto3-${Stage}-cognito-client-id"

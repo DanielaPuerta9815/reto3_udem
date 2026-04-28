@@ -1,0 +1,516 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+ En este stack estan los recursos de base de datos que forman la capa de datos de la aplicacion. Este stack se encarga del almacenamiento y gestion de datos.
+ Estara la DynamoDB, la Aurora. Aqui se definen las tablas, indices, esquemas de base de datos, etc. para soportar la persistencia de datos de la aplicacion.
+
+# =====================================================================
+#  PARAMETERS
+# =====================================================================
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Ambiente de despliegue
+
+  AuroraDbName:
+    Type: String
+    Default: reto3db
+    Description: Nombre de la base de datos dentro del cluster Aurora
+
+  AuroraMasterUsername:
+    Type: String
+    Default: admin
+    Description: Usuario master de Aurora
+
+# =====================================================================
+#  MAPPINGS
+# =====================================================================
+Mappings:
+  StageConfig:
+    dev:
+      MinACU: 0.5
+      MaxACU: 2
+      DeletionProtection: false
+    staging:
+      MinACU: 0.5
+      MaxACU: 4
+      DeletionProtection: false
+    prod:
+      MinACU: 1
+      MaxACU: 8
+      DeletionProtection: true
+
+# =====================================================================
+#  RESOURCES
+# =====================================================================
+Resources:
+  # ===================================================================
+  #  DYNAMODB TABLES
+  # ===================================================================
+
+  # ---------- Tabla de contadores de eventos ----------
+  DynamoDBEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "reto3-${Stage}-events"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ---------- Tabla de asientos ----------
+  DynamoDBSeatsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "reto3-${Stage}-seats"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+        - AttributeName: seat_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+        - AttributeName: seat_id
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ---------- Tabla de conexiones WebSocket ----------
+  DynamoDBSocketsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "reto3-${Stage}-sockets"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connection_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connection_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ===================================================================
+  #  AURORA SERVERLESS V2 (MySQL 8.0)
+  # ===================================================================
+
+  # ---------- VPC mínima para Aurora ----------
+  AuroraVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "reto3-${Stage}-aurora-vpc"
+
+  AuroraSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuroraVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub "reto3-${Stage}-aurora-subnet-a"
+
+  AuroraSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AuroraVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub "reto3-${Stage}-aurora-subnet-b"
+
+  AuroraSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "Subnets for reto3-${Stage} Aurora cluster"
+      SubnetIds:
+        - !Ref AuroraSubnetA
+        - !Ref AuroraSubnetB
+      Tags:
+        - Key: Project
+          Value: reto3
+
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "Security group for reto3-${Stage} Aurora"
+      VpcId: !Ref AuroraVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: !Sub "reto3-${Stage}-aurora-sg"
+
+  # ---------- Secreto en Secrets Manager ----------
+  AuroraSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "reto3-${Stage}-aurora-secret"
+      Description: !Sub "Credenciales del cluster Aurora para reto3-${Stage}"
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${AuroraMasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+
+  # ---------- Cluster Aurora Serverless v2 ----------
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub "reto3-${Stage}-aurora-cluster"
+      Engine: aurora-mysql
+      EngineVersion: "8.0.mysql_aurora.3.10.4"
+      DatabaseName: !Ref AuroraDbName
+      MasterUsername: !Sub "{{resolve:secretsmanager:${AuroraSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${AuroraSecret}:SecretString:password}}"
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !FindInMap [StageConfig, !Ref Stage, MinACU]
+        MaxCapacity: !FindInMap [StageConfig, !Ref Stage, MaxACU]
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref AuroraSecurityGroup
+      EnableHttpEndpoint: true
+      StorageEncrypted: true
+      DeletionProtection:
+        !FindInMap [StageConfig, !Ref Stage, DeletionProtection]
+      BackupRetentionPeriod: 7
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "reto3-${Stage}-aurora-instance-1"
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-mysql
+      PubliclyAccessible: false
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ---------- Adjuntar secreto al cluster ----------
+  SecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref AuroraSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+  # ===================================================================
+  #  INICIALIZACION DE TABLAS AURORA (Custom Resource con Lambda)
+  # ===================================================================
+
+  AuroraInitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-aurora-init-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AuroraDataAPIAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                Resource: !GetAtt AuroraCluster.DBClusterArn
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AuroraSecret
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  AuroraInitLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/reto3-${Stage}-aurora-init"
+      RetentionInDays: 14
+
+  AuroraInitFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - AuroraInitLogGroup
+      - AuroraInstance
+    Properties:
+      FunctionName: !Sub "reto3-${Stage}-aurora-init"
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 120
+      MemorySize: 128
+      Role: !GetAtt AuroraInitRole.Arn
+      Environment:
+        Variables:
+          CLUSTER_ARN: !GetAtt AuroraCluster.DBClusterArn
+          SECRET_ARN: !Ref AuroraSecret
+          DB_NAME: !Ref AuroraDbName
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+          import boto3
+          import cfnresponse
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          rds = boto3.client("rds-data")
+
+          CLUSTER_ARN = os.environ["CLUSTER_ARN"]
+          SECRET_ARN = os.environ["SECRET_ARN"]
+          DB_NAME = os.environ["DB_NAME"]
+
+          STATEMENTS = [
+              """
+              CREATE TABLE IF NOT EXISTS organizers (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(255) NOT NULL,
+                  email VARCHAR(255),
+                  phone VARCHAR(50),
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+              )
+              """,
+              """
+              CREATE TABLE IF NOT EXISTS locations (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(255) NOT NULL,
+                  address VARCHAR(500),
+                  city VARCHAR(100),
+                  capacity INT DEFAULT 0,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+              )
+              """,
+              """
+              CREATE TABLE IF NOT EXISTS events (
+                  id VARCHAR(36) PRIMARY KEY,
+                  organizer_id VARCHAR(36) NOT NULL,
+                  name VARCHAR(255) NOT NULL,
+                  description TEXT,
+                  event_date VARCHAR(20) NOT NULL,
+                  event_time VARCHAR(20) NOT NULL,
+                  total_seats INT NOT NULL DEFAULT 0,
+                  location_id VARCHAR(36) NOT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'active',
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                  INDEX idx_organizer_id (organizer_id),
+                  INDEX idx_status_date (status, event_date),
+                  INDEX idx_organizer_date (organizer_id, event_date),
+                  INDEX idx_location_id (location_id),
+                  FOREIGN KEY (organizer_id) REFERENCES organizers(id),
+                  FOREIGN KEY (location_id) REFERENCES locations(id)
+              )
+              """,
+              """
+              CREATE TABLE IF NOT EXISTS alerts (
+                  id VARCHAR(36) PRIMARY KEY,
+                  event_id VARCHAR(36) NOT NULL,
+                  organizer_id VARCHAR(36) NOT NULL,
+                  alert_type VARCHAR(50) NOT NULL DEFAULT 'campaign',
+                  title VARCHAR(255) NOT NULL,
+                  message TEXT NOT NULL,
+                  target_audience VARCHAR(50) DEFAULT 'all',
+                  status VARCHAR(20) DEFAULT 'active',
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  INDEX idx_event_id (event_id),
+                  INDEX idx_organizer_id (organizer_id),
+                  FOREIGN KEY (event_id) REFERENCES events(id),
+                  FOREIGN KEY (organizer_id) REFERENCES organizers(id)
+              )
+              """,
+              # ---------- Datos de prueba ----------
+              """
+              INSERT IGNORE INTO organizers (id, name, email, phone) VALUES
+              ('org-001', 'Eventos Colombia SAS', 'contacto@eventoscol.com', '+573001234567'),
+              ('org-002', 'Live Shows Latam', 'info@liveshows.co', '+573009876543')
+              """,
+              """
+              INSERT IGNORE INTO locations (id, name, address, city, capacity) VALUES
+              ('loc-001', 'Movistar Arena', 'Calle 63 #59A-06, Bogota', 'Bogota', 14000),
+              ('loc-002', 'Teatro Metropolitan', 'Calle 32 #6-40, Bogota', 'Bogota', 1200),
+              ('loc-003', 'Centro de Convenciones', 'Carrera 37 #24-67, Medellin', 'Medellin', 5000)
+              """,
+          ]
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event)}")
+              request_type = event.get("RequestType", "Create")
+
+              if request_type == "Delete":
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+
+              try:
+                  for sql in STATEMENTS:
+                      sql = sql.strip()
+                      if not sql:
+                          continue
+                      logger.info(f"Executing: {sql[:80]}...")
+                      rds.execute_statement(
+                          resourceArn=CLUSTER_ARN,
+                          secretArn=SECRET_ARN,
+                          database=DB_NAME,
+                          sql=sql,
+                      )
+                  logger.info("All statements executed successfully")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {"Message": "Tables created"})
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  AuroraInitCustomResource:
+    Type: Custom::AuroraInit
+    DependsOn: AuroraInstance
+    Properties:
+      ServiceToken: !GetAtt AuroraInitFunction.Arn
+      # Cambiar este valor para forzar re-ejecucion si se modifica el schema
+      SchemaVersion: "1.0"
+
+# =====================================================================
+#  OUTPUTS
+# =====================================================================
+Outputs:
+  # ---------- DynamoDB ----------
+  DynamoDBEventsTableName:
+    Description: Nombre de la tabla DynamoDB de contadores de eventos
+    Value: !Ref DynamoDBEventsTable
+    Export:
+      Name: !Sub "reto3-${Stage}-dynamodb-events-table-name"
+
+  DynamoDBEventsTableArn:
+    Description: ARN de la tabla DynamoDB de contadores de eventos
+    Value: !GetAtt DynamoDBEventsTable.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-dynamodb-events-table-arn"
+
+  DynamoDBSeatsTableName:
+    Description: Nombre de la tabla DynamoDB de asientos
+    Value: !Ref DynamoDBSeatsTable
+    Export:
+      Name: !Sub "reto3-${Stage}-dynamodb-seats-table-name"
+
+  DynamoDBSeatsTableArn:
+    Description: ARN de la tabla DynamoDB de asientos
+    Value: !GetAtt DynamoDBSeatsTable.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-dynamodb-seats-table-arn"
+
+  DynamoDBSocketsTableName:
+    Description: Nombre de la tabla DynamoDB de conexiones WebSocket
+    Value: !Ref DynamoDBSocketsTable
+    Export:
+      Name: !Sub "reto3-${Stage}-dynamodb-sockets-table-name"
+
+  DynamoDBSocketsTableArn:
+    Description: ARN de la tabla DynamoDB de conexiones WebSocket
+    Value: !GetAtt DynamoDBSocketsTable.Arn
+    Export:
+      Name: !Sub "reto3-${Stage}-dynamodb-sockets-table-arn"
+
+  # ---------- Aurora ----------
+  AuroraClusterArn:
+    Description: ARN del cluster Aurora
+    Value: !GetAtt AuroraCluster.DBClusterArn
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-cluster-arn"
+
+  AuroraClusterEndpoint:
+    Description: Endpoint del cluster Aurora
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-cluster-endpoint"
+
+  AuroraSecretArn:
+    Description: ARN del secreto de Aurora en Secrets Manager
+    Value: !Ref AuroraSecret
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-secret-arn"
+
+  AuroraSecretName:
+    Description: Nombre del secreto de Aurora
+    Value: !Sub "reto3-${Stage}-aurora-secret"
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-secret-name"
+
+  AuroraDbName:
+    Description: Nombre de la base de datos Aurora
+    Value: !Ref AuroraDbName
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-db-name"
+
+  # ---------- VPC (para referencia) ----------
+  AuroraVPCId:
+    Description: VPC ID de Aurora
+    Value: !Ref AuroraVPC
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-vpc-id"
+
+  AuroraSecurityGroupId:
+    Description: Security Group ID de Aurora
+    Value: !Ref AuroraSecurityGroup
+    Export:
+      Name: !Sub "reto3-${Stage}-aurora-sg-id"
+

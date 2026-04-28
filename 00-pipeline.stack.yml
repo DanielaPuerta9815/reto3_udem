@@ -1,0 +1,467 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Reto 3 - Pipeline CI/CD con AWS CodePipeline.
+  Despliega la infraestructura completa en orden de dependencias:
+    Stage 1 (Source)      -> Descarga codigo desde GitHub
+    Stage 2 (Build)       -> Empaqueta Lambdas en ZIPs
+    Stage 3 (Foundation)  -> Despliega en PARALELO: Database, Integration, Cognito, Artifacts
+    Stage 4 (Upload)      -> Sube ZIPs de Lambda al bucket S3 creado en Artifacts
+    Stage 5 (Logic)       -> Despliega Lambdas, API Gateway, WebSocket (depende de todo lo anterior)
+
+  IMPORTANTE: Despues de crear este stack, la conexion a GitHub quedara en estado PENDING.
+  Debe aprobarse manualmente en la consola de AWS:
+    Developer Tools > Settings > Connections > seleccionar la conexion > Update pending connection
+
+# =====================================================================
+#  PARAMETERS
+# =====================================================================
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: Usuario u organizacion propietaria del repositorio GitHub
+
+  GitHubRepo:
+    Type: String
+    Description: Nombre del repositorio GitHub
+
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: Rama del repositorio a monitorear
+
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+    Description: Ambiente de despliegue (dev o prod, compatible con todos los stacks)
+
+# =====================================================================
+#  RESOURCES
+# =====================================================================
+Resources:
+  # ===================================================================
+  #  CODESTAR CONNECTION (GitHub)
+  # ===================================================================
+  GitHubConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: !Sub "reto3-${Stage}-github-connection"
+      ProviderType: GitHub
+
+  # ===================================================================
+  #  S3 - BUCKET PARA ARTEFACTOS DEL PIPELINE
+  # ===================================================================
+  PipelineArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "reto3-${Stage}-pipeline-artifacts-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ===================================================================
+  #  IAM - ROL PARA CODEPIPELINE
+  # ===================================================================
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-codepipeline-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PipelineBasePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # --- Acceso al bucket de artefactos ---
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt PipelineArtifactsBucket.Arn
+                  - !Sub "${PipelineArtifactsBucket.Arn}/*"
+              # --- Conexion a GitHub ---
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: !Ref GitHubConnection
+              # --- Invocar CodeBuild ---
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource:
+                  - !GetAtt PackageLambdasProject.Arn
+                  - !GetAtt UploadLambdasProject.Arn
+              # --- Desplegar CloudFormation ---
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:GetTemplate
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/reto3-${Stage}-*/*"
+              # --- Pasar rol a CloudFormation ---
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt CloudFormationRole.Arn
+
+  # ===================================================================
+  #  IAM - ROL PARA CODEBUILD
+  # ===================================================================
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-codebuild-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildBasePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # --- CloudWatch Logs ---
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/reto3-${Stage}-*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/reto3-${Stage}-*:*"
+              # --- Acceso al bucket de artefactos del pipeline ---
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt PipelineArtifactsBucket.Arn
+                  - !Sub "${PipelineArtifactsBucket.Arn}/*"
+              # --- Acceso al bucket de codigo Lambda (para subir ZIPs) ---
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::reto3-${Stage}-lambda-code-${AWS::AccountId}"
+                  - !Sub "arn:aws:s3:::reto3-${Stage}-lambda-code-${AWS::AccountId}/*"
+              # --- Consultar exports de CloudFormation (para obtener nombre del bucket) ---
+              - Effect: Allow
+                Action:
+                  - cloudformation:ListExports
+                Resource: "*"
+
+  # ===================================================================
+  #  IAM - ROL PARA CLOUDFORMATION (usado por los deploy actions)
+  # ===================================================================
+  CloudFormationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "reto3-${Stage}-cloudformation-deploy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      # Politica amplia porque los stacks crean recursos de muchos servicios:
+      # DynamoDB, RDS Aurora, VPC, IAM, Lambda, API Gateway, Cognito,
+      # SQS, SNS, SES, EventBridge, S3, Secrets Manager, CloudWatch, etc.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  # ===================================================================
+  #  CODEBUILD - PROYECTO: EMPAQUETAR LAMBDAS
+  # ===================================================================
+  PackageLambdasProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "reto3-${Stage}-package-lambdas"
+      Description: Empaqueta cada funcion Lambda (codes/*) en un archivo ZIP
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: STAGE
+            Value: !Ref Stage
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+      TimeoutInMinutes: 15
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ===================================================================
+  #  CODEBUILD - PROYECTO: SUBIR LAMBDAS A S3
+  # ===================================================================
+  UploadLambdasProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "reto3-${Stage}-upload-lambdas"
+      Description: Sube los ZIPs de Lambda al bucket S3 creado por el stack de Artifacts
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: STAGE
+            Value: !Ref Stage
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec-upload-lambdas.yml
+      TimeoutInMinutes: 10
+      Tags:
+        - Key: Project
+          Value: reto3
+        - Key: Stage
+          Value: !Ref Stage
+
+  # ===================================================================
+  #  CODEPIPELINE
+  # ===================================================================
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "reto3-${Stage}-pipeline"
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactsBucket
+      RestartExecutionOnUpdate: false
+      Stages:
+        # =============================================================
+        #  STAGE 1 - SOURCE (GitHub)
+        # =============================================================
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              Configuration:
+                ConnectionArn: !Ref GitHubConnection
+                FullRepositoryId: !Sub "${GitHubOwner}/${GitHubRepo}"
+                BranchName: !Ref GitHubBranch
+                OutputArtifactFormat: CODE_ZIP
+                DetectChanges: true
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+
+        # =============================================================
+        #  STAGE 2 - BUILD (Empaquetar Lambdas)
+        # =============================================================
+        - Name: Build
+          Actions:
+            - Name: PackageLambdas
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref PackageLambdasProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+        # =============================================================
+        #  STAGE 3 - DEPLOY FOUNDATION (paralelo: DB, Integration, Cognito, Artifacts)
+        #  Estos 4 stacks NO tienen dependencias entre si.
+        #  Se despliegan en paralelo usando RunOrder: 1.
+        # =============================================================
+        - Name: DeployFoundation
+          Actions:
+            # ---------- 01 - Database ----------
+            - Name: DeployDatabase
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub "reto3-${Stage}-database"
+                TemplatePath: BuildOutput::01-database.stack.yml
+                ParameterOverrides: !Sub '{"Stage":"${Stage}"}'
+                Capabilities: CAPABILITY_NAMED_IAM
+                RoleArn: !GetAtt CloudFormationRole.Arn
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+            # ---------- 02 - Integration ----------
+            - Name: DeployIntegration
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub "reto3-${Stage}-integration"
+                TemplatePath: BuildOutput::02-integration.stack.yml
+                ParameterOverrides: !Sub '{"Stage":"${Stage}"}'
+                Capabilities: CAPABILITY_IAM
+                RoleArn: !GetAtt CloudFormationRole.Arn
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+            # ---------- 03 - Cognito ----------
+            - Name: DeployCognito
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub "reto3-${Stage}-cognito"
+                TemplatePath: BuildOutput::03-cognito.stack.yml
+                ParameterOverrides: !Sub '{"Stage":"${Stage}"}'
+                Capabilities: CAPABILITY_IAM
+                RoleArn: !GetAtt CloudFormationRole.Arn
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+            # ---------- 04 - Artifacts (S3 bucket para codigo Lambda) ----------
+            - Name: DeployArtifacts
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub "reto3-${Stage}-artifacts"
+                TemplatePath: BuildOutput::04-artifacts-stack.yml
+                ParameterOverrides: !Sub '{"Stage":"${Stage}"}'
+                Capabilities: CAPABILITY_IAM
+                RoleArn: !GetAtt CloudFormationRole.Arn
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+        # =============================================================
+        #  STAGE 4 - UPLOAD LAMBDAS (sube ZIPs al bucket S3)
+        #  Se ejecuta DESPUES de que el bucket exista (stack 04 desplegado).
+        # =============================================================
+        - Name: UploadLambdas
+          Actions:
+            - Name: UploadZipsToS3
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref UploadLambdasProject
+              InputArtifacts:
+                - Name: BuildOutput
+              OutputArtifacts:
+                - Name: UploadOutput
+              RunOrder: 1
+
+        # =============================================================
+        #  STAGE 5 - DEPLOY LOGIC (Lambdas + API Gateway + WebSocket)
+        #  Depende de TODOS los stacks anteriores:
+        #    - Database (DynamoDB tables, Aurora)
+        #    - Integration (EventBridge, SQS, SNS, S3 reports)
+        #    - Cognito (User Pool para el Authorizer)
+        #    - Artifacts (bucket S3 con los ZIPs de Lambda)
+        # =============================================================
+        - Name: DeployLogic
+          Actions:
+            - Name: DeployLogicStack
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub "reto3-${Stage}-logic"
+                TemplatePath: BuildOutput::05-logic.stack.yml
+                ParameterOverrides: !Sub '{"Stage":"${Stage}"}'
+                Capabilities: CAPABILITY_NAMED_IAM
+                RoleArn: !GetAtt CloudFormationRole.Arn
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+# =====================================================================
+#  OUTPUTS
+# =====================================================================
+Outputs:
+  PipelineName:
+    Description: Nombre del pipeline
+    Value: !Ref Pipeline
+
+  PipelineUrl:
+    Description: URL de la consola del pipeline
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/reto3-${Stage}-pipeline/view?region=${AWS::Region}"
+
+  GitHubConnectionArn:
+    Description: ARN de la conexion a GitHub (debe aprobarse manualmente en la consola)
+    Value: !Ref GitHubConnection
+
+  GitHubConnectionStatus:
+    Description: >
+      Estado de la conexion. Despues de crear el stack, ir a Developer Tools > Connections
+      y aprobar la conexion pendiente para que el pipeline pueda acceder al repositorio.
+    Value: PENDING
+
+  PipelineArtifactsBucketName:
+    Description: Bucket S3 para artefactos del pipeline
+    Value: !Ref PipelineArtifactsBucket

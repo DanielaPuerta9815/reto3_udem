@@ -1,0 +1,30 @@
+version: 0.2
+
+# =====================================================================
+#  BUILDSPEC - Empaqueta las funciones Lambda en archivos ZIP
+#  Este buildspec se ejecuta en el stage "Build" del pipeline.
+#  Recorre cada carpeta dentro de codes/ y genera un .zip por Lambda.
+# =====================================================================
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+
+  build:
+    commands:
+      - echo "=== Empaquetando funciones Lambda ==="
+      - mkdir -p zips
+      - |
+        for dir in codes/*/; do
+          func_name=$(basename "$dir")
+          echo "Empaquetando ${func_name}..."
+          (cd "$dir" && zip -r "../../zips/${func_name}.zip" .)
+        done
+      - echo "=== Paquetes generados ==="
+      - ls -la zips/
+
+artifacts:
+  files:
+    - "**/*"
+  name: BuildOutput
