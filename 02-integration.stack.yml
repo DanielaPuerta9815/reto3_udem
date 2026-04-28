@@ -43,6 +43,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "reto3-${Stage}-report-queue"
+      VisibilityTimeout: 360
 
   # ===================================================================
   #  S3 - BUCKET PARA REPORTES
