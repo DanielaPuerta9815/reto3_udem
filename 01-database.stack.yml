@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
- En este stack estan los recursos de base de datos que forman la capa de datos de la aplicacion. Este stack se encarga del almacenamiento y gestion de datos.
- Estara la DynamoDB, la Aurora. Aqui se definen las tablas, indices, esquemas de base de datos, etc. para soportar la persistencia de datos de la aplicacion.
+  En este stack estan los recursos de base de datos que forman la capa de datos de la aplicacion. Este stack se encarga del almacenamiento y gestion de datos.
+  Estara la DynamoDB, la Aurora. Aqui se definen las tablas, indices, esquemas de base de datos, etc. para soportar la persistencia de datos de la aplicacion.
 
 # =====================================================================
 #  PARAMETERS
@@ -365,6 +365,15 @@ Resources:
               )
               """,
               """
+              CREATE TABLE IF NOT EXISTS attendees (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(255) NOT NULL,
+                  email VARCHAR(255),
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+              )
+              """,
+              """
               CREATE TABLE IF NOT EXISTS alerts (
                   id VARCHAR(36) PRIMARY KEY,
                   event_id VARCHAR(36) NOT NULL,
@@ -513,4 +522,3 @@ Outputs:
     Value: !Ref AuroraSecurityGroup
     Export:
       Name: !Sub "reto3-${Stage}-aurora-sg-id"
-

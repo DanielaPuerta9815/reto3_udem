@@ -26,6 +26,15 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Acceso denegado. Se requiere rol ATTENDEE."}),
         }
 
+    # Extraer user_id del JWT
+    user_id = claims.get("sub", "")
+    if not user_id:
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "No se pudo obtener el user_id del token"}),
+        }
+
     try:
         seat_id = event.get("pathParameters", {}).get("seatId")
         if not seat_id:
@@ -37,14 +46,13 @@ def lambda_handler(event, context):
 
         body = json.loads(event.get("body", "{}"))
         event_id = body.get("event_id")
-        user_id = body.get("user_id")
         new_seat_id = body.get("new_seat_id")
 
-        if not all([event_id, user_id]):
+        if not event_id:
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "event_id y user_id son requeridos"}),
+                "body": json.dumps({"error": "event_id es requerido"}),
             }
 
         seats_table = dynamodb.Table(SEATS_TABLE)

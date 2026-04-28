@@ -27,6 +27,15 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Acceso denegado. Se requiere rol ATTENDEE."}),
         }
 
+    # Extraer user_id del JWT
+    user_id = claims.get("sub", "")
+    if not user_id:
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "No se pudo obtener el user_id del token"}),
+        }
+
     try:
         seat_id = event.get("pathParameters", {}).get("seatId")
         if not seat_id:
@@ -36,16 +45,15 @@ def lambda_handler(event, context):
                 "body": json.dumps({"error": "seatId es requerido"}),
             }
 
-        # user_id y event_id vienen como query params en un DELETE
+        # event_id viene como query param en un DELETE
         query_params = event.get("queryStringParameters") or {}
         event_id = query_params.get("event_id")
-        user_id = query_params.get("user_id")
 
-        if not all([event_id, user_id]):
+        if not event_id:
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "event_id y user_id son requeridos como query parameters"}),
+                "body": json.dumps({"error": "event_id es requerido como query parameter"}),
             }
 
         seats_table = dynamodb.Table(SEATS_TABLE)

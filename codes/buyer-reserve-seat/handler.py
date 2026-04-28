@@ -37,20 +37,27 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Acceso denegado. Se requiere rol ATTENDEE."}),
         }
 
-    # Extraer correo del usuario desde el JWT
+    # Extraer user_id y correo del usuario desde el JWT
+    user_id = claims.get("sub", "")
     user_email = claims.get("email", "")
+
+    if not user_id:
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({"error": "No se pudo obtener el user_id del token"}),
+        }
 
     try:
         body = json.loads(event.get("body", "{}"))
         event_id = body.get("event_id")
         seat_id = body.get("seat_id")
-        user_id = body.get("user_id")
 
-        if not all([event_id, seat_id, user_id]):
+        if not all([event_id, seat_id]):
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-                "body": json.dumps({"error": "event_id, seat_id y user_id son requeridos"}),
+                "body": json.dumps({"error": "event_id y seat_id son requeridos"}),
             }
 
         # Verificar que el evento existe y esta activo en Aurora

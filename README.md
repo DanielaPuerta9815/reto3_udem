@@ -854,7 +854,7 @@ Usa **"Organizer - CREATE REPORT"**:
 
 ## Paso 19 - Probar los Endpoints del Comprador
 
-Puedes usar el mismo token del organizador o hacer login con el usuario comprador y actualizar la variable `TOKEN`.
+Debes hacer login con el usuario comprador y actualizar la variable `TOKEN`.
 
 ### 19.1 - Ver Todos los Eventos
 

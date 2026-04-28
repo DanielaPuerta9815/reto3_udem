@@ -98,6 +98,25 @@ def lambda_handler(event, context):
             )
             logger.info(f"Organizador registrado en Aurora: {user_sub}")
 
+        # 5b. Si es ATTENDEE, registrar en la tabla attendees de Aurora
+        if group == "ATTENDEE" and AURORA_CLUSTER_ARN:
+            name = body.get("name", email)
+            rds_client.execute_statement(
+                resourceArn=AURORA_CLUSTER_ARN,
+                secretArn=AURORA_SECRET_ARN,
+                database=AURORA_DB_NAME,
+                sql="""
+                    INSERT INTO attendees (id, name, email)
+                    VALUES (:id, :name, :email)
+                """,
+                parameters=[
+                    {"name": "id", "value": {"stringValue": user_sub}},
+                    {"name": "name", "value": {"stringValue": name}},
+                    {"name": "email", "value": {"stringValue": email}},
+                ],
+            )
+            logger.info(f"Attendee registrado en Aurora: {user_sub}")
+
         # 6. Suscribir el correo del usuario al tópico SNS de notificaciones
         if SNS_TOPIC_ARN:
             try:
