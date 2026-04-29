@@ -212,7 +212,7 @@ Resources:
       StorageEncrypted: true
       DeletionProtection:
         !FindInMap [StageConfig, !Ref Stage, DeletionProtection]
-      BackupRetentionPeriod: 7
+      BackupRetentionPeriod: 1 #Se 1 por el maximo del free tier
       Tags:
         - Key: Project
           Value: reto3
