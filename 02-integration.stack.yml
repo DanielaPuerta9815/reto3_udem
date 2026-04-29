@@ -52,7 +52,7 @@ Resources:
   ReportsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "reto3-${Stage}-reports"
+      BucketName: !Sub "reto3-${Stage}-reportsnew"
 
   # ===================================================================
   #  SNS - TOPICO DE NOTIFICACIONES
