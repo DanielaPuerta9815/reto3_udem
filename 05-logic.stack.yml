@@ -222,7 +222,7 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
-                Resource: !Sub "arn:aws:s3:::reto3-${Stage}-reports/*"
+                Resource: !Sub "arn:aws:s3:::reto3-${Stage}-reportsnew/*"
 
         - PolicyName: SNSPublishAccess
           PolicyDocument:

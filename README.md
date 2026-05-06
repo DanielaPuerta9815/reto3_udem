@@ -309,7 +309,7 @@ Deberías ver algo como: `git version 2.x.x`
 3. Clona el repositorio:
 
    ```bash
-   git clone https://github.com/JuanesGalvis/reto3_udem.git
+   git clone https://github.com/DanielaPuerta9815/reto3_udem.git
    ```
 
 4. Entra a la carpeta del proyecto:
@@ -437,6 +437,22 @@ Verifica que el código se subió correctamente visitando tu repositorio en GitH
 
 Este es el paso más importante. Al desplegar este stack, se creará **todo el pipeline de CI/CD** que a su vez desplegará automáticamente toda la infraestructura restante.
 
+#### Prerrequisitos
+
+  Antes de desplegar el stack, asegúrate de cumplir con lo siguiente:
+
+  - Tener permisos para desplegar recursos con CloudFormation
+  - Tener creado el **Service Linked Role de RDS**
+
+  ---
+
+  #### Crear el Service Linked Role (solo una vez por cuenta)
+
+  Ejecuta el siguiente comando:
+
+  ```bash
+  aws iam create-service-linked-role --aws-service-name rds.amazonaws.com
+  ```
 ### 8.1 - Ejecutar el comando de creación del stack
 
 Abre una terminal y ejecuta el siguiente comando **completo** (es un solo comando, cópialo todo):
@@ -834,6 +850,15 @@ Usa **"Organizer - CREATE ALERT/NOTIFICATION"**:
 ```
 
 ### 18.6 - Generar un Reporte
+
+Se tienen los siguientes reportes disponibles 
+
+- general: Información general del evento
+- attendance: Asistentes del evento
+- sales: Ventas que ha tenido el evento
+- occupancy: Ocupación del evento 
+
+Según el reporte del cual se desee obtener la información, se debe configurar en el valor `report_type`
 
 Usa **"Organizer - CREATE REPORT"**:
 
